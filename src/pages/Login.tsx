@@ -34,7 +34,7 @@ export function Login() {
 
   return (
     <div className="flex min-h-dvh items-center justify-center bg-paper px-4">
-      <div className="w-full max-w-md rounded-3xl border border-line bg-surface p-8 shadow-[0_20px_60px_-40px_rgba(26,22,20,0.45)]">
+      <div className="w-full max-w-md rounded-3xl border border-line bg-surface p-8 shadow-[0_20px_60px_-40px_rgba(15,23,42,0.35)]">
         <p className="font-serif text-4xl text-forest">Central</p>
         <p className="mt-2 text-sm text-muted">
           Sua base de organização: tarefas, finanças e viagens, no celular e no

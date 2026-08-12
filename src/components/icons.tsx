@@ -62,6 +62,32 @@ export function LogoutIcon(props: IconProps) {
   )
 }
 
+export function PlusIcon(props: IconProps) {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  )
+}
+
+export function CloseIcon(props: IconProps) {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="M6 6l12 12M18 6 6 18" />
+    </svg>
+  )
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="M4 7h16" />
+      <path d="M9 7V5h6v2" />
+      <path d="M7 7l1 13h8l1-13" />
+    </svg>
+  )
+}
+
 export function GoogleIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden {...props}>

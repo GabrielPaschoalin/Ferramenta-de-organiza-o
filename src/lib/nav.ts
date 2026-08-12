@@ -13,7 +13,7 @@ export type ModuleInfo = {
   to: string
   title: string
   blurb: string
-  status: 'em breve'
+  status: 'em breve' | 'ativo'
 }
 
 export const navItems: NavItem[] = [
@@ -29,7 +29,7 @@ export const modules: ModuleInfo[] = [
     to: '/tarefas',
     title: 'Tarefas',
     blurb: 'Listas, prazos e o que precisa ser feito no dia a dia.',
-    status: 'em breve',
+    status: 'ativo',
   },
   {
     id: 'financas',

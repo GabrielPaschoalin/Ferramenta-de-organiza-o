@@ -37,9 +37,15 @@ export function Home() {
                 <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-paper text-forest">
                   <NavGlyph name={iconByModule[mod.id]} className="h-5 w-5" />
                 </span>
-                <span className="rounded-full bg-paper px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-muted">
-                  {mod.status}
-                </span>
+                {mod.status === 'em breve' ? (
+                  <span className="rounded-full bg-paper px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-muted">
+                    em breve
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-secondary/10 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-secondary">
+                    ativo
+                  </span>
+                )}
               </div>
               <h2 className="mt-4 font-serif text-xl text-ink">{mod.title}</h2>
               <p className="mt-1 text-sm text-muted">{mod.blurb}</p>
