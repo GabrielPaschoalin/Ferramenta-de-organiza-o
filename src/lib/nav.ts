@@ -35,8 +35,8 @@ export const modules: ModuleInfo[] = [
     id: 'financas',
     to: '/financas',
     title: 'Finanças',
-    blurb: 'Contas, categorias, saldo e lançamentos em um só lugar.',
-    status: 'em breve',
+    blurb: 'Gastos do mês a partir do extrato, com categorias que você cria.',
+    status: 'ativo',
   },
   {
     id: 'viagens',

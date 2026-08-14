@@ -18,5 +18,9 @@ export type Task = {
   completedAt: number | null
 }
 
-export type StatusFilter = 'todas' | 'hoje' | 'concluidas'
-export type CategoryFilter = 'all' | 'none' | string
+export type TaskListFilters = {
+  showCompleted: boolean
+  categoryId: 'all' | 'none' | string
+  dueDate: string
+  priority: 'all' | 'none' | Priority
+}

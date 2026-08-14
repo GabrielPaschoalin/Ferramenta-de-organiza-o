@@ -70,6 +70,40 @@ export function PlusIcon(props: IconProps) {
   )
 }
 
+export function FilterIcon(props: IconProps) {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="M4 6h16M7 12h10M10 18h4" />
+    </svg>
+  )
+}
+
+export function UploadIcon(props: IconProps) {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="M12 16V5" />
+      <path d="m8 8 4-4 4 4" />
+      <path d="M5 19h14" />
+    </svg>
+  )
+}
+
+export function ChevronLeftIcon(props: IconProps) {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="m14 6-6 6 6 6" />
+    </svg>
+  )
+}
+
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <svg {...svgProps(props)}>
+      <path d="m10 6 6 6-6 6" />
+    </svg>
+  )
+}
+
 export function CloseIcon(props: IconProps) {
   return (
     <svg {...svgProps(props)}>

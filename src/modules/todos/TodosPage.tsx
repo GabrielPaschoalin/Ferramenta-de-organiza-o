@@ -14,20 +14,23 @@ import { TaskRow } from '@/modules/todos/TaskRow'
 import { TodoFilters } from '@/modules/todos/TodoFilters'
 import { filterTasks, todayISO } from '@/modules/todos/helpers'
 import { useTodos } from '@/modules/todos/useTodos'
-import type { CategoryFilter, StatusFilter, Task } from '@/modules/todos/types'
+import type { Task, TaskListFilters } from '@/modules/todos/types'
+
+const defaultFilters: TaskListFilters = {
+  showCompleted: false,
+  categoryId: 'all',
+  dueDate: '',
+  priority: 'all',
+}
 
 export function TodosPage() {
   const { user, tasks, categories, loading, error } = useTodos()
-  const [status, setStatus] = useState<StatusFilter>('todas')
-  const [category, setCategory] = useState<CategoryFilter>('all')
+  const [filters, setFilters] = useState<TaskListFilters>(defaultFilters)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [manageCategories, setManageCategories] = useState(false)
   const today = todayISO()
 
-  const visible = useMemo(
-    () => filterTasks(tasks, status, category, today),
-    [tasks, status, category, today],
-  )
+  const visible = useMemo(() => filterTasks(tasks, filters), [tasks, filters])
 
   const selected = tasks.find((task) => task.id === selectedId) ?? null
 
@@ -44,7 +47,7 @@ export function TodosPage() {
     })
   }
 
-  async function handleChange(patch: Partial<Omit<Task, 'id'>>) {
+  async function handleSave(patch: Partial<Omit<Task, 'id' | 'done' | 'createdAt' | 'completedAt'>>) {
     if (!user || !selected) return
     await updateTask(user.uid, selected.id, patch)
   }
@@ -71,11 +74,9 @@ export function TodosPage() {
 
       <div className="mt-5">
         <TodoFilters
-          status={status}
-          category={category}
+          filters={filters}
           categories={categories}
-          onStatus={setStatus}
-          onCategory={setCategory}
+          onChange={setFilters}
           onManageCategories={() => setManageCategories(true)}
         />
       </div>
@@ -117,7 +118,7 @@ export function TodosPage() {
           task={selected}
           categories={categories}
           onClose={() => setSelectedId(null)}
-          onChange={handleChange}
+          onSave={handleSave}
           onDelete={handleDelete}
           onAddCategory={async (name) => {
             if (!user) return
