@@ -1,7 +1,8 @@
 export type ExpenseKind = 'expense' | 'income' | 'ignored'
-export type ExpenseSource = 'ofx' | 'csv' | 'manual'
+export type ExpenseSource = 'ofx' | 'csv' | 'pdf' | 'manual'
 export type ExpenseBank = 'nubank' | 'inter' | 'beevale'
-export type PaymentMethod = 'credit' | 'debit'
+export type PaymentMethod = 'credit' | 'debit' | 'vale'
+export type ImportMode = 'statement' | 'invoice'
 
 export type ExpenseCategory = {
   id: string
@@ -35,7 +36,7 @@ export type ParsedTransaction = {
   amount: number
   description: string
   externalId: string
-  source: 'ofx' | 'csv'
+  source: 'ofx' | 'csv' | 'pdf'
 }
 
 export type ImportRow = ParsedTransaction & {
@@ -45,4 +46,14 @@ export type ImportRow = ParsedTransaction & {
   method: PaymentMethod
   duplicate: boolean
   include: boolean
+}
+
+export type MethodFilter = 'all' | PaymentMethod
+export type BankFilter = 'all' | ExpenseBank
+export type CategoryFilter = 'all' | 'none' | string
+
+export type ExpenseListFilters = {
+  categoryId: CategoryFilter
+  method: MethodFilter
+  bank: BankFilter
 }

@@ -5,6 +5,8 @@ import type {
   ExpenseKind,
   ExpenseRule,
   ExpenseTransaction,
+  ExpenseListFilters,
+  ImportMode,
   ParsedTransaction,
   PaymentMethod,
 } from '@/modules/finance/types'
@@ -95,17 +97,52 @@ export function signedAmount(kind: ExpenseKind, absValue: number) {
   return -value
 }
 
+export function isInvoicePayment(description: string) {
+  const hay = normalizeText(description)
+  const patterns = [
+    'pagamento de fatura',
+    'pagamento fatura',
+    'pagto fatura',
+    'pag fatura',
+    'pgto fatura',
+    'fatura cartao',
+    'fatura do cartao',
+    'pagamento cartao',
+    'pagto cartao',
+    'pgto cartao',
+    'pagamento da fatura',
+    'debito fatura',
+    'deb automatico fatura',
+    'pagamento nubank',
+    'pagamento inter',
+  ]
+  return patterns.some((pattern) => hay.includes(pattern))
+}
+
 export function transactionsInMonth(
   transactions: ExpenseTransaction[],
   month: string,
-  categoryId: 'all' | 'none' | string,
+  filters: ExpenseListFilters = {
+    categoryId: 'all',
+    method: 'all',
+    bank: 'all',
+  },
 ) {
   return transactions
     .filter((item) => item.kind !== 'ignored' && item.date.startsWith(month))
     .filter((item) => {
-      if (categoryId === 'all') return true
-      if (categoryId === 'none') return !item.categoryId
-      return item.categoryId === categoryId
+      if (filters.categoryId === 'all') return true
+      if (filters.categoryId === 'none') return !item.categoryId
+      return item.categoryId === filters.categoryId
+    })
+    .filter((item) => {
+      if (filters.method === 'all') return true
+      if (filters.method === 'vale') return item.method === 'vale' || item.bank === 'beevale'
+      return item.method === filters.method
+    })
+    .filter((item) => {
+      if (filters.bank === 'all') return true
+      return item.bank === filters.bank
     })
     .sort((a, b) => {
       if (a.date !== b.date) return b.date.localeCompare(a.date)
@@ -154,9 +191,11 @@ export function applyRules(
   knownIds: Set<string>,
   bank: ExpenseBank,
   method: PaymentMethod,
+  mode: ImportMode = 'statement',
 ) {
   return parsed.map((item) => {
     const duplicate = knownIds.has(item.externalId)
+    const invoicePayment = mode === 'statement' && isInvoicePayment(item.description)
     const rule = matchRule(item.description, rules)
     const suggested = suggestCategoryName(item.description, bank)
     const suggestedId =
@@ -164,15 +203,16 @@ export function applyRules(
         ? categories.find((category) => normalizeText(category.name) === normalizeText(suggested))
             ?.id ?? null
         : null
-    const kind = kindFromAmount(item.amount)
+    const kind = invoicePayment ? 'ignored' : kindFromAmount(item.amount)
+    const resolvedMethod = bank === 'beevale' ? 'vale' : method
     return {
       ...item,
       kind,
-      categoryId: rule?.categoryId ?? suggestedId,
+      categoryId: invoicePayment ? null : rule?.categoryId ?? suggestedId,
       bank,
-      method,
+      method: resolvedMethod,
       duplicate,
-      include: !duplicate && kind === 'expense',
+      include: !duplicate && !invoicePayment && kind === 'expense',
     }
   })
 }

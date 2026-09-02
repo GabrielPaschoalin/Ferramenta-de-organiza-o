@@ -16,6 +16,7 @@ import {
   renameExpenseCategory,
   updateExpenseTransaction,
 } from '@/modules/finance/api'
+import { BANKS, PAYMENT_METHODS } from '@/modules/finance/catalog'
 import { CategoryModal } from '@/modules/finance/CategoryModal'
 import { ExpensePanel } from '@/modules/finance/ExpensePanel'
 import { ExpenseRow } from '@/modules/finance/ExpenseRow'
@@ -32,29 +33,43 @@ import {
 } from '@/modules/finance/helpers'
 import { useExpenses } from '@/modules/finance/useExpenses'
 import type {
+  BankFilter,
+  CategoryFilter,
   ExpenseBank,
   ExpenseKind,
+  ExpenseListFilters,
   ExpenseTransaction,
+  ImportMode,
   ImportRow,
+  MethodFilter,
   PaymentMethod,
 } from '@/modules/finance/types'
 
 export function ExpensesPage() {
   const { user, transactions, categories, rules, loading, error } = useExpenses()
   const [month, setMonth] = useState(currentMonth)
-  const [categoryFilter, setCategoryFilter] = useState<'all' | 'none' | string>('all')
-  const [importOpen, setImportOpen] = useState(false)
+  const [filters, setFilters] = useState<ExpenseListFilters>({
+    categoryId: 'all',
+    method: 'all',
+    bank: 'all',
+  })
+  const [importMode, setImportMode] = useState<ImportMode | null>(null)
   const [manageCategories, setManageCategories] = useState(false)
   const [creating, setCreating] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
 
   const visible = useMemo(
-    () => transactionsInMonth(transactions, month, categoryFilter),
-    [transactions, month, categoryFilter],
+    () => transactionsInMonth(transactions, month, filters),
+    [transactions, month, filters],
   )
   const monthItems = useMemo(
-    () => transactionsInMonth(transactions, month, 'all'),
+    () =>
+      transactionsInMonth(transactions, month, {
+        categoryId: 'all',
+        method: 'all',
+        bank: 'all',
+      }),
     [transactions, month],
   )
   const totals = useMemo(() => monthTotals(monthItems), [monthItems])
@@ -176,11 +191,19 @@ export function ExpensesPage() {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => setImportOpen(true)}
+            onClick={() => setImportMode('statement')}
             className="inline-flex items-center gap-1.5 rounded-xl bg-forest px-3 py-2 text-sm font-medium text-paper"
           >
             <UploadIcon className="h-4 w-4" />
             Enviar extrato
+          </button>
+          <button
+            type="button"
+            onClick={() => setImportMode('invoice')}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-line bg-surface px-3 py-2 text-sm font-medium text-ink"
+          >
+            <UploadIcon className="h-4 w-4" />
+            Enviar fatura
           </button>
           <button
             type="button"
@@ -220,28 +243,76 @@ export function ExpensesPage() {
             />
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            <FilterChip
-              active={categoryFilter === 'all'}
-              onClick={() => setCategoryFilter('all')}
-            >
-              Todas
-            </FilterChip>
-            <FilterChip
-              active={categoryFilter === 'none'}
-              onClick={() => setCategoryFilter('none')}
-            >
-              Sem categoria
-            </FilterChip>
-            {categories.map((item) => (
-              <FilterChip
-                key={item.id}
-                active={categoryFilter === item.id}
-                onClick={() => setCategoryFilter(item.id)}
+          <div className="mt-5 grid gap-3 sm:grid-cols-3">
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
+                Banco
+              </span>
+              <select
+                value={filters.bank}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    bank: event.target.value as BankFilter,
+                  }))
+                }
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-ink outline-none focus:border-forest"
               >
-                {item.name}
-              </FilterChip>
-            ))}
+                <option value="all">Todos</option>
+                {BANKS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
+                Categoria
+              </span>
+              <select
+                value={filters.categoryId}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    categoryId: event.target.value as CategoryFilter,
+                  }))
+                }
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-ink outline-none focus:border-forest"
+              >
+                <option value="all">Todas</option>
+                <option value="none">Sem categoria</option>
+                {categories.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
+                Tipo de pagamento
+              </span>
+              <select
+                value={filters.method}
+                onChange={(event) =>
+                  setFilters((current) => ({
+                    ...current,
+                    method: event.target.value as MethodFilter,
+                  }))
+                }
+                className="w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-sm text-ink outline-none focus:border-forest"
+              >
+                <option value="all">Todos</option>
+                {PAYMENT_METHODS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           {visible.length > 0 ? (
@@ -270,7 +341,7 @@ export function ExpensesPage() {
             {visible.length === 0 ? (
               <li className="rounded-2xl border border-dashed border-line bg-surface px-4 py-8 text-center text-sm text-muted">
                 {monthItems.length === 0
-                  ? 'Nada neste mês. Envie um extrato OFX ou CSV, ou adicione um lançamento.'
+                  ? 'Nada neste mês. Envie um extrato, uma fatura, ou adicione um lançamento.'
                   : 'Nenhum lançamento neste filtro.'}
               </li>
             ) : (
@@ -289,13 +360,14 @@ export function ExpensesPage() {
         </>
       )}
 
-      {importOpen && user ? (
+      {importMode && user ? (
         <ImportModal
           uid={user.uid}
+          mode={importMode}
           categories={categories}
           rules={rules}
           transactions={transactions}
-          onClose={() => setImportOpen(false)}
+          onClose={() => setImportMode(null)}
           onImport={handleImport}
         />
       ) : null}
@@ -331,28 +403,5 @@ export function ExpensesPage() {
         />
       ) : null}
     </div>
-  )
-}
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: string
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        'rounded-full px-3 py-1.5 text-sm font-medium transition-colors',
-        active ? 'bg-forest text-paper' : 'bg-surface text-muted hover:text-ink',
-      ].join(' ')}
-    >
-      {children}
-    </button>
   )
 }

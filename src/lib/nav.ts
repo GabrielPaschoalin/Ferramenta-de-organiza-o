@@ -35,7 +35,7 @@ export const modules: ModuleInfo[] = [
     id: 'financas',
     to: '/financas',
     title: 'Finanças',
-    blurb: 'Gastos do mês a partir do extrato, com categorias que você cria.',
+    blurb: 'Gastos do mês e investimentos (ações, caixinha e Tesouro).',
     status: 'ativo',
   },
   {

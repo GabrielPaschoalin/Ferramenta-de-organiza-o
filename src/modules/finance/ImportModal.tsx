@@ -15,12 +15,14 @@ import {
   type CsvTable,
 } from '@/modules/finance/parseCsv'
 import { parseOfx } from '@/modules/finance/parseOfx'
+import { parseInvoicePdf } from '@/modules/finance/parsePdf'
 import type {
   ExpenseBank,
   ExpenseCategory,
   ExpenseKind,
   ExpenseRule,
   ExpenseTransaction,
+  ImportMode,
   ImportRow,
   ParsedTransaction,
   PaymentMethod,
@@ -30,8 +32,13 @@ function isOfxName(name: string) {
   return /\.(ofx|ofc|qfx)$/i.test(name) || name.toLowerCase().includes('.ofx')
 }
 
+function isPdfName(name: string) {
+  return /\.pdf$/i.test(name)
+}
+
 export function ImportModal({
   uid,
+  mode,
   categories,
   rules,
   transactions,
@@ -39,6 +46,7 @@ export function ImportModal({
   onImport,
 }: {
   uid: string
+  mode: ImportMode
   categories: ExpenseCategory[]
   rules: ExpenseRule[]
   transactions: ExpenseTransaction[]
@@ -49,8 +57,8 @@ export function ImportModal({
   const [error, setError] = useState<string | null>(null)
   const [rows, setRows] = useState<ImportRow[] | null>(null)
   const [readyCategories, setReadyCategories] = useState(categories)
-  const [bank, setBank] = useState<ExpenseBank>('nubank')
-  const [method, setMethod] = useState<PaymentMethod>('debit')
+  const [bank, setBank] = useState<ExpenseBank>(mode === 'invoice' ? 'inter' : 'nubank')
+  const [method, setMethod] = useState<PaymentMethod>(mode === 'invoice' ? 'credit' : 'debit')
   const [csvTable, setCsvTable] = useState<CsvTable | null>(null)
   const [mapping, setMapping] = useState<CsvMapping>({
     date: 0,
@@ -58,6 +66,7 @@ export function ImportModal({
     amount: 2,
   })
   const [saving, setSaving] = useState(false)
+  const [reading, setReading] = useState(false)
 
   const knownIds = useMemo(
     () => new Set(transactions.map((item) => item.externalId)),
@@ -66,6 +75,15 @@ export function ImportModal({
 
   const selected = rows?.filter((item) => item.include && !item.duplicate) ?? []
   const duplicates = rows?.filter((item) => item.duplicate).length ?? 0
+  const ignoredInvoice = rows?.filter((item) => item.kind === 'ignored').length ?? 0
+
+  const title = mode === 'invoice' ? 'Enviar fatura' : 'Enviar extrato'
+  const accept =
+    mode === 'invoice' ? '.pdf,.ofx,.ofc,.qfx,.csv,.txt' : '.ofx,.ofc,.qfx,.csv,.txt'
+  const pickLabel =
+    mode === 'invoice'
+      ? 'Escolher PDF, OFX ou CSV da fatura'
+      : 'Escolher arquivo OFX ou CSV'
 
   async function loadParsed(parsed: ParsedTransaction[]) {
     if (parsed.length === 0) {
@@ -77,40 +95,61 @@ export function ImportModal({
     setReadyCategories(nextCategories)
     setError(null)
     setCsvTable(null)
-    setRows(applyRules(parsed, rules, nextCategories, knownIds, bank, method))
+    setRows(applyRules(parsed, rules, nextCategories, knownIds, bank, method, mode))
   }
 
   async function handleFile(file: File) {
     setError(null)
-    const text = await file.text()
-    if (isOfxName(file.name) || /<STMTTRN>/i.test(text)) {
-      await loadParsed(parseOfx(text))
-      return
-    }
+    setReading(true)
+    try {
+      if (isPdfName(file.name) || file.type === 'application/pdf') {
+        if (mode !== 'invoice') {
+          setError('PDF serve para fatura do cartão. Use o botão Enviar fatura.')
+          return
+        }
+        await loadParsed(await parseInvoicePdf(file))
+        return
+      }
 
-    const result = parseCsv(text)
-    if (result.mapping && result.transactions.length > 0) {
-      await loadParsed(result.transactions)
-      return
-    }
+      const text = await file.text()
+      if (isOfxName(file.name) || /<STMTTRN>/i.test(text)) {
+        await loadParsed(parseOfx(text))
+        return
+      }
 
-    if (result.table.headers.length >= 3) {
-      setCsvTable(result.table)
-      setMapping(
-        result.mapping ?? {
-          date: 0,
-          description: 1,
-          amount: Math.min(2, result.table.headers.length - 1),
-        },
+      const result = parseCsv(text)
+      if (result.mapping && result.transactions.length > 0) {
+        await loadParsed(result.transactions)
+        return
+      }
+
+      if (result.table.headers.length >= 3) {
+        setCsvTable(result.table)
+        setMapping(
+          result.mapping ?? {
+            date: 0,
+            description: 1,
+            amount: Math.min(2, result.table.headers.length - 1),
+          },
+        )
+        setRows(null)
+        setError(null)
+        return
+      }
+
+      setError(
+        mode === 'invoice'
+          ? 'Não consegui ler este arquivo. Use PDF da fatura (Inter) ou OFX/CSV.'
+          : 'Não consegui ler este arquivo. Use OFX ou CSV com data, descrição e valor.',
       )
       setRows(null)
-      setError(null)
-      return
+      setCsvTable(null)
+    } catch {
+      setError('Falha ao ler o arquivo. Confira se o PDF não está protegido por senha.')
+      setRows(null)
+    } finally {
+      setReading(false)
     }
-
-    setError('Não consegui ler este arquivo. Use OFX ou CSV com data, descrição e valor.')
-    setRows(null)
-    setCsvTable(null)
   }
 
   function applyMapping() {
@@ -120,8 +159,15 @@ export function ImportModal({
 
   function changeBank(next: ExpenseBank) {
     setBank(next)
+    if (next === 'beevale') setMethod('vale')
     setRows((current) =>
-      current ? current.map((item) => ({ ...item, bank: next })) : current,
+      current
+        ? current.map((item) => ({
+            ...item,
+            bank: next,
+            method: next === 'beevale' ? 'vale' : item.method,
+          }))
+        : current,
     )
   }
 
@@ -160,7 +206,7 @@ export function ImportModal({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-line px-5 py-4">
-          <p className="font-serif text-xl text-ink">Enviar extrato</p>
+          <p className="font-serif text-xl text-ink">{title}</p>
           <button
             type="button"
             onClick={onClose}
@@ -176,7 +222,7 @@ export function ImportModal({
             <input
               ref={inputRef}
               type="file"
-              accept=".ofx,.ofc,.qfx,.csv,.txt"
+              accept={accept}
               className="hidden"
               onChange={(event) => {
                 const file = event.target.files?.[0]
@@ -187,12 +233,15 @@ export function ImportModal({
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="rounded-xl border border-dashed border-line bg-paper px-4 py-3 text-sm text-ink"
+              disabled={reading}
+              className="rounded-xl border border-dashed border-line bg-paper px-4 py-3 text-sm text-ink disabled:opacity-60"
             >
-              Escolher arquivo OFX ou CSV
+              {reading ? 'Lendo arquivo...' : pickLabel}
             </button>
             <p className="mt-2 text-xs text-muted">
-              O arquivo fica no seu aparelho. Só os lançamentos vão para a nuvem.
+              {mode === 'invoice'
+                ? 'Para Inter, use o PDF da fatura fechada. Pagamento da fatura não entra como gasto.'
+                : 'Pagamentos de fatura do cartão são ignorados automaticamente. O arquivo fica no seu aparelho.'}
             </p>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="block">
@@ -213,7 +262,7 @@ export function ImportModal({
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
-                  Crédito ou débito
+                  Tipo
                 </span>
                 <select
                   value={method}
@@ -277,6 +326,7 @@ export function ImportModal({
                 <p className="text-sm text-muted">
                   {selected.length} novos
                   {duplicates ? ` · ${duplicates} já importados` : ''}
+                  {ignoredInvoice ? ` · ${ignoredInvoice} pagamentos de fatura ignorados` : ''}
                   {' · '}
                   {rows.filter((item) => item.categoryId).length} pré-categorizados
                 </p>
@@ -286,7 +336,9 @@ export function ImportModal({
                     setRows((current) =>
                       current
                         ? current.map((item) =>
-                            item.duplicate ? item : { ...item, include: false },
+                            item.duplicate || item.kind === 'ignored'
+                              ? item
+                              : { ...item, include: false },
                           )
                         : current,
                     )
@@ -300,14 +352,17 @@ export function ImportModal({
                 {rows.map((item, index) => (
                   <li
                     key={`${item.externalId}-${index}`}
-                    className="rounded-xl border border-line px-3 py-2"
+                    className={[
+                      'rounded-xl border px-3 py-2',
+                      item.kind === 'ignored' ? 'border-line/60 bg-paper/60 opacity-70' : 'border-line',
+                    ].join(' ')}
                   >
                     <div className="flex items-start gap-2">
                       <input
                         type="checkbox"
                         className="mt-1"
-                        checked={item.include && !item.duplicate}
-                        disabled={item.duplicate}
+                        checked={item.include && !item.duplicate && item.kind !== 'ignored'}
+                        disabled={item.duplicate || item.kind === 'ignored'}
                         onChange={(event) =>
                           patchRow(index, { include: event.target.checked })
                         }
@@ -315,7 +370,7 @@ export function ImportModal({
                       <div className="min-w-0 flex-1">
                         <input
                           value={item.description}
-                          disabled={item.duplicate}
+                          disabled={item.duplicate || item.kind === 'ignored'}
                           onChange={(event) =>
                             patchRow(index, { description: event.target.value })
                           }
@@ -325,45 +380,49 @@ export function ImportModal({
                         <p className="mt-0.5 text-xs text-muted">
                           {formatDate(item.date)} · {formatMoney(Math.abs(item.amount))}
                           {item.duplicate ? ' · já importado' : ''}
+                          {item.kind === 'ignored' ? ' · pagamento de fatura (não é gasto)' : ''}
                         </p>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <select
-                            value={item.kind}
-                            disabled={item.duplicate}
-                            onChange={(event) => {
-                              const kind = event.target.value as ExpenseKind
-                              patchRow(index, {
-                                kind,
-                                amount:
-                                  kind === 'ignored'
-                                    ? item.amount
-                                    : signedAmount(kind, item.amount),
-                              })
-                            }}
-                            className="rounded-lg border border-line bg-paper px-2 py-1 text-xs outline-none"
-                          >
-                            <option value="expense">Gasto</option>
-                            <option value="income">Receita</option>
-                            <option value="ignored">Ignorar</option>
-                          </select>
-                          <select
-                            value={item.categoryId ?? ''}
-                            disabled={item.duplicate}
-                            onChange={(event) =>
-                              patchRow(index, {
-                                categoryId: event.target.value || null,
-                              })
-                            }
-                            className="rounded-lg border border-line bg-paper px-2 py-1 text-xs outline-none"
-                          >
-                            <option value="">Sem categoria</option>
-                            {readyCategories.map((category) => (
-                              <option key={category.id} value={category.id}>
-                                {category.name}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        {item.kind !== 'ignored' ? (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            <select
+                              value={item.kind}
+                              disabled={item.duplicate}
+                              onChange={(event) => {
+                                const kind = event.target.value as ExpenseKind
+                                patchRow(index, {
+                                  kind,
+                                  amount:
+                                    kind === 'ignored'
+                                      ? item.amount
+                                      : signedAmount(kind, item.amount),
+                                  include: kind === 'expense' ? item.include : false,
+                                })
+                              }}
+                              className="rounded-lg border border-line bg-paper px-2 py-1 text-xs outline-none"
+                            >
+                              <option value="expense">Gasto</option>
+                              <option value="income">Receita</option>
+                              <option value="ignored">Ignorar</option>
+                            </select>
+                            <select
+                              value={item.categoryId ?? ''}
+                              disabled={item.duplicate}
+                              onChange={(event) =>
+                                patchRow(index, {
+                                  categoryId: event.target.value || null,
+                                })
+                              }
+                              className="rounded-lg border border-line bg-paper px-2 py-1 text-xs outline-none"
+                            >
+                              <option value="">Sem categoria</option>
+                              {readyCategories.map((category) => (
+                                <option key={category.id} value={category.id}>
+                                  {category.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </li>

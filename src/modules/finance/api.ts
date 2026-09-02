@@ -65,7 +65,7 @@ function isKind(value: unknown): value is ExpenseKind {
 }
 
 function isSource(value: unknown): value is ExpenseSource {
-  return value === 'ofx' || value === 'csv' || value === 'manual'
+  return value === 'ofx' || value === 'csv' || value === 'pdf' || value === 'manual'
 }
 
 function isBank(value: unknown): value is ExpenseBank {
@@ -73,11 +73,17 @@ function isBank(value: unknown): value is ExpenseBank {
 }
 
 function isMethod(value: unknown): value is PaymentMethod {
-  return value === 'credit' || value === 'debit'
+  return value === 'credit' || value === 'debit' || value === 'vale'
 }
 
 function asTransaction(id: string, data: Record<string, unknown>): ExpenseTransaction {
   const amount = typeof data.amount === 'number' ? data.amount : Number(data.amount)
+  const bank = isBank(data.bank) ? data.bank : 'nubank'
+  const method = isMethod(data.method)
+    ? data.method
+    : bank === 'beevale'
+      ? 'vale'
+      : 'debit'
   return {
     id,
     date: String(data.date ?? ''),
@@ -86,8 +92,8 @@ function asTransaction(id: string, data: Record<string, unknown>): ExpenseTransa
     categoryId: typeof data.categoryId === 'string' ? data.categoryId : null,
     kind: isKind(data.kind) ? data.kind : 'expense',
     source: isSource(data.source) ? data.source : 'manual',
-    bank: isBank(data.bank) ? data.bank : 'nubank',
-    method: isMethod(data.method) ? data.method : 'debit',
+    bank,
+    method,
     externalId: String(data.externalId ?? id),
     createdAt: typeof data.createdAt === 'number' ? data.createdAt : 0,
   }

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ExpensesPage } from '@/modules/finance/ExpensesPage'
+import { InvestmentsPage } from '@/modules/finance/investments/InvestmentsPage'
 
 type Tab = 'gastos' | 'investimentos'
 
@@ -20,7 +21,7 @@ export function FinancePage() {
       </p>
       <h1 className="mt-2 font-serif text-3xl text-ink md:text-4xl">Seu dinheiro no mês</h1>
       <p className="mt-2 text-muted">
-        Gastos a partir do extrato. Investimentos entram na próxima etapa.
+        Gastos do extrato e investimentos (ações, caixinha e Tesouro).
       </p>
 
       <div className="mt-6 flex flex-wrap gap-2">
@@ -36,19 +37,7 @@ export function FinancePage() {
         </button>
       </div>
 
-      <div className="mt-6">
-        {tab === 'gastos' ? (
-          <ExpensesPage />
-        ) : (
-          <div className="rounded-2xl border border-dashed border-line bg-surface px-4 py-10 text-center">
-            <p className="font-medium text-ink">Investimentos</p>
-            <p className="mt-2 text-sm text-muted">
-              Esta parte entra na próxima etapa. Por enquanto, use a aba Gastos para
-              importar o extrato e acompanhar o mês.
-            </p>
-          </div>
-        )}
-      </div>
+      <div className="mt-6">{tab === 'gastos' ? <ExpensesPage /> : <InvestmentsPage />}</div>
     </div>
   )
 }

@@ -18,6 +18,7 @@ export const BANKS: { id: ExpenseBank; label: string }[] = [
 export const PAYMENT_METHODS: { id: PaymentMethod; label: string }[] = [
   { id: 'credit', label: 'Crédito' },
   { id: 'debit', label: 'Débito' },
+  { id: 'vale', label: 'Vale' },
 ]
 
 export const DEFAULT_CATEGORIES: { name: string; keywords: string[] }[] = [
