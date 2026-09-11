@@ -1,5 +1,5 @@
 import { fingerprint } from '@/modules/finance/helpers'
-import type { ParsedTransaction } from '@/modules/finance/types'
+import type { ParsedTransaction, StatementBalance } from '@/modules/finance/types'
 
 function tagValue(block: string, tag: string) {
   const match = block.match(new RegExp(`<${tag}>([^<\\r\\n]+)`, 'i'))
@@ -18,10 +18,41 @@ function parseOfxAmount(value: string) {
   return Number.isFinite(amount) ? amount : null
 }
 
+function parseBalance(text: string): StatementBalance | null {
+  const blocks = text.match(/<(?:LEDGERBAL|AVAILBAL|BAL)>[\s\S]*?(?:<\/(?:LEDGERBAL|AVAILBAL|BAL)>|(?=<(?:LEDGERBAL|AVAILBAL|BAL|BANKTRANLIST|CREDITCARDMSGSRSV1)|$))/gi) ?? []
+  for (const block of blocks) {
+    const amount = parseOfxAmount(tagValue(block, 'BALAMT'))
+    const date = parseOfxDate(tagValue(block, 'DTASOF'))
+    if (amount !== null) {
+      return { amount, date: date || new Date().toISOString().slice(0, 10) }
+    }
+  }
+
+  const loose = text.match(/<BALAMT>([^<\r\n]+)/i)
+  if (loose) {
+    const amount = parseOfxAmount(loose[1])
+    if (amount !== null) {
+      const dateMatch = text.match(/<DTASOF>([^<\r\n]+)/i)
+      return {
+        amount,
+        date: dateMatch ? parseOfxDate(dateMatch[1]) || new Date().toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+      }
+    }
+  }
+  return null
+}
+
 export function parseOfx(text: string): ParsedTransaction[] {
+  return parseOfxStatement(text).transactions
+}
+
+export function parseOfxStatement(text: string): {
+  transactions: ParsedTransaction[]
+  balance: StatementBalance | null
+} {
   const blocks = text.match(/<STMTTRN>[\s\S]*?(?:<\/STMTTRN>|(?=<STMTTRN>)|$)/gi) ?? []
 
-  return blocks.flatMap((block) => {
+  const transactions = blocks.flatMap((block) => {
     const rawAmount = tagValue(block, 'TRNAMT')
     const amount = parseOfxAmount(rawAmount)
     const date = parseOfxDate(tagValue(block, 'DTPOSTED'))
@@ -49,4 +80,6 @@ export function parseOfx(text: string): ParsedTransaction[] {
       },
     ]
   })
+
+  return { transactions, balance: parseBalance(text) }
 }

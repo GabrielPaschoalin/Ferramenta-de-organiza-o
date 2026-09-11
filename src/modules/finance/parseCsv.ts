@@ -1,5 +1,5 @@
 import { fingerprint } from '@/modules/finance/helpers'
-import type { ParsedTransaction } from '@/modules/finance/types'
+import type { ParsedTransaction, StatementBalance } from '@/modules/finance/types'
 
 export type CsvTable = {
   headers: string[]
@@ -10,6 +10,7 @@ export type CsvMapping = {
   date: number
   description: number
   amount: number
+  balance: number | null
 }
 
 function detectDelimiter(text: string) {
@@ -75,7 +76,10 @@ function scoreHeader(name: string, kind: keyof CsvMapping) {
     }
   }
   if (kind === 'amount') {
-    if (/(valor|amount|value|quantia)/.test(value)) return 2
+    if (/(valor|amount|value|quantia)/.test(value) && !/saldo/.test(value)) return 2
+  }
+  if (kind === 'balance') {
+    if (/(saldo|balance|ledger)/.test(value)) return 2
   }
   return 0
 }
@@ -84,9 +88,15 @@ export function guessCsvMapping(headers: string[]): CsvMapping | null {
   const date = headers.findIndex((item) => scoreHeader(item, 'date') > 0)
   const description = headers.findIndex((item) => scoreHeader(item, 'description') > 0)
   const amount = headers.findIndex((item) => scoreHeader(item, 'amount') > 0)
+  const balanceIndex = headers.findIndex((item) => scoreHeader(item, 'balance') > 0)
   if (date < 0 || description < 0 || amount < 0) return null
   if (new Set([date, description, amount]).size !== 3) return null
-  return { date, description, amount }
+  return {
+    date,
+    description,
+    amount,
+    balance: balanceIndex >= 0 && balanceIndex !== amount ? balanceIndex : null,
+  }
 }
 
 export function parseDateCell(value: string) {
@@ -144,9 +154,34 @@ export function applyCsvMapping(
   })
 }
 
+export function csvStatementBalance(table: CsvTable, mapping: CsvMapping): StatementBalance | null {
+  if (mapping.balance == null) return null
+  for (let index = table.rows.length - 1; index >= 0; index -= 1) {
+    const row = table.rows[index]
+    const amount = parseAmountCell(row[mapping.balance] ?? '')
+    const date = parseDateCell(row[mapping.date] ?? '')
+    if (amount !== null) {
+      return { amount, date: date || new Date().toISOString().slice(0, 10) }
+    }
+  }
+  return null
+}
+
 export function parseCsv(text: string) {
   const table = readCsvTable(text)
   const mapping = guessCsvMapping(table.headers)
-  if (!mapping) return { table, mapping: null, transactions: [] as ParsedTransaction[] }
-  return { table, mapping, transactions: applyCsvMapping(table, mapping) }
+  if (!mapping) {
+    return {
+      table,
+      mapping: null,
+      transactions: [] as ParsedTransaction[],
+      balance: null as StatementBalance | null,
+    }
+  }
+  return {
+    table,
+    mapping,
+    transactions: applyCsvMapping(table, mapping),
+    balance: csvStatementBalance(table, mapping),
+  }
 }

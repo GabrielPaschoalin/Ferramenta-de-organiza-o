@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { CloseIcon, TrashIcon } from '@/components/icons'
-import type { ExpenseCategory } from '@/modules/finance/types'
+import type { CategoryGroup, ExpenseCategory } from '@/modules/finance/types'
 
 export function CategoryModal({
   categories,
@@ -11,21 +11,10 @@ export function CategoryModal({
 }: {
   categories: ExpenseCategory[]
   onClose: () => void
-  onAdd: (name: string) => Promise<void>
+  onAdd: (name: string, kind: CategoryGroup) => Promise<void>
   onRename: (id: string, name: string) => Promise<void>
   onDelete: (id: string) => Promise<void>
 }) {
-  const [name, setName] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingName, setEditingName] = useState('')
-
-  async function handleAdd(event: FormEvent) {
-    event.preventDefault()
-    if (!name.trim()) return
-    await onAdd(name)
-    setName('')
-  }
-
   return (
     <div
       className="fixed inset-0 z-40 flex items-end justify-center bg-ink/25 p-4 md:items-center"
@@ -47,77 +36,120 @@ export function CategoryModal({
           </button>
         </div>
 
-        <ul className="max-h-64 space-y-2 overflow-y-auto">
-          {categories.length === 0 ? (
-            <li className="rounded-xl bg-paper px-3 py-3 text-sm text-muted">
-              Nenhuma categoria ainda.
-            </li>
-          ) : (
-            categories.map((item) => (
-              <li
-                key={item.id}
-                className="flex items-center gap-2 rounded-xl border border-line px-3 py-2"
-              >
-                {editingId === item.id ? (
-                  <input
-                    value={editingName}
-                    onChange={(event) => setEditingName(event.target.value)}
-                    onBlur={() => {
-                      if (editingName.trim()) void onRename(item.id, editingName)
-                      setEditingId(null)
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
-                    }}
-                    className="h-9 flex-1 rounded-lg bg-paper px-2 text-sm outline-none"
-                    autoFocus
-                  />
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingId(item.id)
-                      setEditingName(item.name)
-                    }}
-                    className="flex-1 text-left text-sm text-ink"
-                  >
-                    {item.name}
-                  </button>
-                )}
+        <div className="space-y-5">
+          <CategoryGroupList
+            title="Saída"
+            placeholder="Nova categoria de saída"
+            items={categories.filter((item) => item.kind === 'expense')}
+            onAdd={(name) => onAdd(name, 'expense')}
+            onRename={onRename}
+            onDelete={onDelete}
+          />
+          <CategoryGroupList
+            title="Entrada"
+            placeholder="Nova categoria de entrada"
+            items={categories.filter((item) => item.kind === 'income')}
+            onAdd={(name) => onAdd(name, 'income')}
+            onRename={onRename}
+            onDelete={onDelete}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CategoryGroupList({
+  title,
+  placeholder,
+  items,
+  onAdd,
+  onRename,
+  onDelete,
+}: {
+  title: string
+  placeholder: string
+  items: ExpenseCategory[]
+  onAdd: (name: string) => Promise<void>
+  onRename: (id: string, name: string) => Promise<void>
+  onDelete: (id: string) => Promise<void>
+}) {
+  const [name, setName] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editingName, setEditingName] = useState('')
+
+  async function handleAdd(event: FormEvent) {
+    event.preventDefault()
+    if (!name.trim()) return
+    await onAdd(name)
+    setName('')
+  }
+
+  return (
+    <div>
+      <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted">{title}</p>
+      <ul className="max-h-40 space-y-2 overflow-y-auto">
+        {items.length === 0 ? (
+          <li className="rounded-xl bg-paper px-3 py-3 text-sm text-muted">Nenhuma categoria ainda.</li>
+        ) : (
+          items.map((item) => (
+            <li key={item.id} className="flex items-center gap-2 rounded-xl border border-line px-3 py-2">
+              {editingId === item.id ? (
+                <input
+                  value={editingName}
+                  onChange={(event) => setEditingName(event.target.value)}
+                  onBlur={() => {
+                    if (editingName.trim()) void onRename(item.id, editingName)
+                    setEditingId(null)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') (event.target as HTMLInputElement).blur()
+                  }}
+                  className="h-9 flex-1 rounded-lg bg-paper px-2 text-sm outline-none"
+                  autoFocus
+                />
+              ) : (
                 <button
                   type="button"
                   onClick={() => {
-                    const ok = window.confirm(
-                      `Apagar "${item.name}"? Os lançamentos ficam sem categoria.`,
-                    )
-                    if (ok) void onDelete(item.id)
+                    setEditingId(item.id)
+                    setEditingName(item.name)
                   }}
-                  className="rounded-lg p-1.5 text-muted hover:bg-paper hover:text-clay"
-                  aria-label={`Apagar ${item.name}`}
+                  className="flex-1 text-left text-sm text-ink"
                 >
-                  <TrashIcon className="h-4 w-4" />
+                  {item.name}
                 </button>
-              </li>
-            ))
-          )}
-        </ul>
-
-        <form onSubmit={(event) => void handleAdd(event)} className="mt-4 flex gap-2">
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Nova categoria"
-            className="h-11 flex-1 rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-forest"
-          />
-          <button
-            type="submit"
-            disabled={!name.trim()}
-            className="rounded-xl bg-forest px-4 text-sm font-medium text-paper disabled:opacity-50"
-          >
-            Criar
-          </button>
-        </form>
-      </div>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  const ok = window.confirm(`Apagar "${item.name}"? Os lançamentos ficam sem categoria.`)
+                  if (ok) void onDelete(item.id)
+                }}
+                className="rounded-lg p-1.5 text-muted hover:bg-paper hover:text-clay"
+                aria-label={`Apagar ${item.name}`}
+              >
+                <TrashIcon className="h-4 w-4" />
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
+      <form onSubmit={(event) => void handleAdd(event)} className="mt-3 flex gap-2">
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder={placeholder}
+          className="h-11 flex-1 rounded-xl border border-line bg-paper px-3 text-sm outline-none focus:border-forest"
+        />
+        <button
+          type="submit"
+          disabled={!name.trim()}
+          className="rounded-xl bg-forest px-4 text-sm font-medium text-paper disabled:opacity-50"
+        >
+          Criar
+        </button>
+      </form>
     </div>
   )
 }

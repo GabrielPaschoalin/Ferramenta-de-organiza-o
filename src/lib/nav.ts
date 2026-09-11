@@ -35,7 +35,7 @@ export const modules: ModuleInfo[] = [
     id: 'financas',
     to: '/financas',
     title: 'Finanças',
-    blurb: 'Gastos do mês e investimentos (ações, caixinha e Tesouro).',
+    blurb: 'Fluxo de caixa, cartão de crédito, investimentos e resumo.',
     status: 'ativo',
   },
   {

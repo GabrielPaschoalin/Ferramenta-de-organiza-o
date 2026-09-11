@@ -1,21 +1,28 @@
-import { bankLabel, methodLabel } from '@/modules/finance/catalog'
-import { categoryName, formatDate, formatMoney } from '@/modules/finance/helpers'
-import type { ExpenseCategory, ExpenseTransaction } from '@/modules/finance/types'
+import { accountLabel, categoryName, formatDate, formatMoney, kindLabel } from '@/modules/finance/helpers'
+import type { ExpenseCategory, ExpenseTransaction, FinanceAccount } from '@/modules/finance/types'
 
 export function ExpenseRow({
   transaction,
   categories,
+  accounts,
   selected,
   onToggleSelect,
   onOpen,
 }: {
   transaction: ExpenseTransaction
   categories: ExpenseCategory[]
+  accounts: FinanceAccount[]
   selected: boolean
   onToggleSelect: () => void
   onOpen: () => void
 }) {
   const expense = transaction.kind === 'expense'
+  const income = transaction.kind === 'income'
+  const investment = transaction.kind === 'investment'
+  const installment =
+    transaction.installmentCurrent && transaction.installmentTotal
+      ? `${transaction.installmentCurrent}/${transaction.installmentTotal}`
+      : null
 
   return (
     <li>
@@ -32,15 +39,22 @@ export function ExpenseRow({
             <p className="truncate text-sm font-medium text-ink">{transaction.description}</p>
             <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
               <span>{formatDate(transaction.date)}</span>
-              <span>{categoryName(categories, transaction.categoryId)}</span>
-              <span>
-                {bankLabel(transaction.bank)} · {methodLabel(transaction.method)}
-              </span>
-              <span>{expense ? 'Gasto' : 'Receita'}</span>
+              {investment ? null : <span>{categoryName(categories, transaction.categoryId)}</span>}
+              <span>{accountLabel(accounts, transaction.accountId)}</span>
+              {transaction.destAccountId ? (
+                <span>para {accountLabel(accounts, transaction.destAccountId)}</span>
+              ) : null}
+              <span>{kindLabel(transaction.kind)}</span>
+              {installment ? <span>Parcela {installment}</span> : null}
             </p>
           </div>
-          <p className={['shrink-0 text-sm font-medium', expense ? 'text-clay' : 'text-success'].join(' ')}>
-            {expense ? '-' : '+'}
+          <p
+            className={[
+              'shrink-0 text-sm font-medium',
+              expense ? 'text-clay' : income ? 'text-success' : investment ? 'text-forest' : 'text-muted',
+            ].join(' ')}
+          >
+            {expense || investment ? '-' : income ? '+' : ''}
             {formatMoney(Math.abs(transaction.amount))}
           </p>
         </button>

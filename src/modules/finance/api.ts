@@ -12,16 +12,35 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
-import { DEFAULT_CATEGORIES } from '@/modules/finance/catalog'
-import { matchRule, normalizeText, suggestPattern } from '@/modules/finance/helpers'
+import { DEFAULT_ACCOUNTS, DEFAULT_CATEGORIES, inferCategoryKind } from '@/modules/finance/catalog'
+import {
+  dateInMonth,
+  inferLegacyAccount,
+  installmentIdentity,
+  institutionToBank,
+  invoiceDueDate,
+  matchRule,
+  methodFromAccount,
+  normalizeText,
+  replaceInstallmentLabel,
+  shiftMonth,
+  splitInstallmentAmounts,
+  suggestPattern,
+  todayISO,
+} from '@/modules/finance/helpers'
 import type {
+  AccountInstitution,
+  AccountType,
+  CategoryGroup,
   ExpenseBank,
   ExpenseCategory,
   ExpenseKind,
   ExpenseRule,
   ExpenseSource,
   ExpenseTransaction,
+  FinanceAccount,
   PaymentMethod,
+  TransactionInput,
 } from '@/modules/finance/types'
 
 function requireDb() {
@@ -43,10 +62,16 @@ function transactionsCol(uid: string) {
   return collection(requireDb(), 'users', uid, 'expenseTransactions')
 }
 
+function accountsCol(uid: string) {
+  return collection(requireDb(), 'users', uid, 'financeAccounts')
+}
+
 function asCategory(id: string, data: Record<string, unknown>): ExpenseCategory {
+  const name = String(data.name ?? '')
   return {
     id,
-    name: String(data.name ?? ''),
+    name,
+    kind: data.kind === 'income' || data.kind === 'expense' ? data.kind : inferCategoryKind(name),
     createdAt: typeof data.createdAt === 'number' ? data.createdAt : 0,
   }
 }
@@ -61,7 +86,14 @@ function asRule(id: string, data: Record<string, unknown>): ExpenseRule {
 }
 
 function isKind(value: unknown): value is ExpenseKind {
-  return value === 'expense' || value === 'income' || value === 'ignored'
+  return (
+    value === 'expense' ||
+    value === 'income' ||
+    value === 'ignored' ||
+    value === 'transfer' ||
+    value === 'investment' ||
+    value === 'adjustment'
+  )
 }
 
 function isSource(value: unknown): value is ExpenseSource {
@@ -76,7 +108,51 @@ function isMethod(value: unknown): value is PaymentMethod {
   return value === 'credit' || value === 'debit' || value === 'vale'
 }
 
-function asTransaction(id: string, data: Record<string, unknown>): ExpenseTransaction {
+function isInstitution(value: unknown): value is AccountInstitution {
+  return value === 'nubank' || value === 'inter' || value === 'beevale' || value === 'other'
+}
+
+function isAccountType(value: unknown): value is AccountType {
+  return (
+    value === 'checking' ||
+    value === 'payment' ||
+    value === 'savings' ||
+    value === 'cash' ||
+    value === 'wallet' ||
+    value === 'vale' ||
+    value === 'credit'
+  )
+}
+
+function optionalString(value: unknown) {
+  return typeof value === 'string' && value ? value : null
+}
+
+function optionalNumber(value: unknown) {
+  const amount = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(amount) ? amount : null
+}
+
+export function asAccount(id: string, data: Record<string, unknown>): FinanceAccount {
+  return {
+    id,
+    name: String(data.name ?? 'Conta'),
+    institution: isInstitution(data.institution) ? data.institution : 'other',
+    type: isAccountType(data.type) ? data.type : 'checking',
+    initialBalance: typeof data.initialBalance === 'number' ? data.initialBalance : 0,
+    initialBalanceDate: String(data.initialBalanceDate ?? todayISO()),
+    archived: data.archived === true,
+    createdAt: typeof data.createdAt === 'number' ? data.createdAt : 0,
+    brand: optionalString(data.brand),
+    lastFour: optionalString(data.lastFour),
+    limit: optionalNumber(data.limit),
+    closingDay: optionalNumber(data.closingDay),
+    dueDay: optionalNumber(data.dueDay),
+    paymentAccountId: optionalString(data.paymentAccountId),
+  }
+}
+
+export function asTransaction(id: string, data: Record<string, unknown>): ExpenseTransaction {
   const amount = typeof data.amount === 'number' ? data.amount : Number(data.amount)
   const bank = isBank(data.bank) ? data.bank : 'nubank'
   const method = isMethod(data.method)
@@ -84,18 +160,29 @@ function asTransaction(id: string, data: Record<string, unknown>): ExpenseTransa
     : bank === 'beevale'
       ? 'vale'
       : 'debit'
+  const date = String(data.date ?? '')
   return {
     id,
-    date: String(data.date ?? ''),
+    date,
+    paymentDate: String(data.paymentDate ?? data.competenceDate ?? date),
     amount: Number.isFinite(amount) ? amount : 0,
     description: String(data.description ?? ''),
     categoryId: typeof data.categoryId === 'string' ? data.categoryId : null,
     kind: isKind(data.kind) ? data.kind : 'expense',
     source: isSource(data.source) ? data.source : 'manual',
+    accountId: String(data.accountId ?? ''),
+    destAccountId: optionalString(data.destAccountId),
     bank,
     method,
     externalId: String(data.externalId ?? id),
     createdAt: typeof data.createdAt === 'number' ? data.createdAt : 0,
+    merchant: optionalString(data.merchant),
+    notes: optionalString(data.notes),
+    hidden: data.hidden === true,
+    installmentGroupId: optionalString(data.installmentGroupId),
+    installmentCurrent: optionalNumber(data.installmentCurrent),
+    installmentTotal: optionalNumber(data.installmentTotal),
+    invoiceMonth: optionalString(data.invoiceMonth),
   }
 }
 
@@ -145,11 +232,30 @@ export function subscribeExpenseTransactions(
   )
 }
 
-export async function addExpenseCategory(uid: string, name: string) {
+export function subscribeFinanceAccounts(
+  uid: string,
+  onData: (accounts: FinanceAccount[]) => void,
+  onError: (message: string) => void,
+): Unsubscribe {
+  return onSnapshot(
+    query(accountsCol(uid)),
+    (snap) => {
+      onData(
+        snap.docs
+          .map((item) => asAccount(item.id, item.data()))
+          .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+      )
+    },
+    (error) => onError(error.message),
+  )
+}
+
+export async function addExpenseCategory(uid: string, name: string, kind: CategoryGroup = 'expense') {
   const trimmed = name.trim()
   if (!trimmed) return
   const ref = await addDoc(categoriesCol(uid), {
     name: trimmed,
+    kind,
     createdAt: Date.now(),
   })
   return ref.id
@@ -165,9 +271,7 @@ export async function renameExpenseCategory(uid: string, categoryId: string, nam
 
 export async function deleteExpenseCategory(uid: string, categoryId: string) {
   const firestore = requireDb()
-  const linked = await getDocs(
-    query(transactionsCol(uid), where('categoryId', '==', categoryId)),
-  )
+  const linked = await getDocs(query(transactionsCol(uid), where('categoryId', '==', categoryId)))
   const rules = await getDocs(query(rulesCol(uid), where('categoryId', '==', categoryId)))
 
   const batch = writeBatch(firestore)
@@ -177,15 +281,138 @@ export async function deleteExpenseCategory(uid: string, categoryId: string) {
   await batch.commit()
 }
 
-export async function addExpenseTransaction(
+export type AccountInput = Omit<FinanceAccount, 'id' | 'createdAt'>
+
+export async function addFinanceAccount(uid: string, input: AccountInput) {
+  const ref = await addDoc(accountsCol(uid), {
+    ...input,
+    createdAt: Date.now(),
+  })
+  return ref.id
+}
+
+export async function updateFinanceAccount(
   uid: string,
-  input: Omit<ExpenseTransaction, 'id' | 'createdAt'>,
+  accountId: string,
+  patch: Partial<AccountInput>,
 ) {
+  await updateDoc(doc(requireDb(), 'users', uid, 'financeAccounts', accountId), patch)
+}
+
+export async function archiveFinanceAccount(uid: string, accountId: string) {
+  await updateFinanceAccount(uid, accountId, { archived: true })
+}
+
+export async function addExpenseTransaction(uid: string, input: TransactionInput) {
   const ref = await addDoc(transactionsCol(uid), {
     ...input,
     createdAt: Date.now(),
   })
   return ref.id
+}
+
+export async function addInstallmentPurchase(
+  uid: string,
+  input: TransactionInput,
+  installments: number,
+  invoiceMonths: string[],
+  paymentDates: string[] = [],
+) {
+  const parts = splitInstallmentAmounts(input.amount, installments)
+  const groupId = `inst-${Date.now()}`
+  const firestore = requireDb()
+  const now = Date.now()
+  const batch = writeBatch(firestore)
+
+  parts.forEach((amount, index) => {
+    const invoiceMonth = invoiceMonths[index] ?? invoiceMonths[0] ?? input.date.slice(0, 7)
+    batch.set(doc(transactionsCol(uid)), {
+      ...input,
+      amount,
+      paymentDate: paymentDates[index] ?? input.paymentDate,
+      installmentGroupId: groupId,
+      installmentCurrent: index + 1,
+      installmentTotal: installments,
+      invoiceMonth,
+      date: dateInMonth(invoiceMonth, Number(input.date.slice(8, 10)) || 1),
+      externalId: `${input.externalId}:${index + 1}`,
+      createdAt: now,
+    })
+  })
+
+  await batch.commit()
+  return groupId
+}
+
+export async function scheduleRemainingInstallments(
+  uid: string,
+  current: ExpenseTransaction,
+  existing: ExpenseTransaction[],
+  accounts: FinanceAccount[],
+) {
+  const from = current.installmentCurrent
+  const total = current.installmentTotal
+  if (!from || !total || from >= total) return
+
+  const account = accounts.find((item) => item.id === current.accountId)
+  const closingDay = account?.closingDay ?? 10
+  const dueDay = account?.dueDay ?? 17
+  const baseMonth = current.invoiceMonth || current.date.slice(0, 7)
+  const day = Number(current.date.slice(8, 10)) || 1
+  const groupId = current.installmentGroupId || `inst-${current.id}`
+  const knownIds = new Set(existing.map((item) => item.externalId))
+  const knownInstallments = new Set(
+    existing.map(installmentIdentity).filter((item): item is string => Boolean(item)),
+  )
+
+  if (!current.installmentGroupId) {
+    await updateExpenseTransaction(uid, current.id, { installmentGroupId: groupId })
+  }
+
+  const firestore = requireDb()
+  const now = Date.now()
+  const batch = writeBatch(firestore)
+  let added = 0
+
+  for (let index = from + 1; index <= total; index += 1) {
+    const month = shiftMonth(baseMonth, index - from)
+    const description = replaceInstallmentLabel(current.description, index, total)
+    const externalId = `${current.externalId}:p${index}`
+    const identity = installmentIdentity({
+      accountId: current.accountId,
+      description,
+      amount: current.amount,
+      installmentCurrent: index,
+      installmentTotal: total,
+    })
+    if (knownIds.has(externalId) || (identity && knownInstallments.has(identity))) continue
+    added += 1
+    batch.set(doc(transactionsCol(uid)), {
+      date: dateInMonth(month, day),
+      paymentDate: invoiceDueDate(month, closingDay, dueDay),
+      description,
+      amount: current.amount,
+      categoryId: current.categoryId,
+      kind: current.kind,
+      source: current.source,
+      accountId: current.accountId,
+      destAccountId: current.destAccountId,
+      bank: current.bank,
+      method: current.method,
+      externalId,
+      merchant: current.merchant,
+      notes: current.notes,
+      hidden: false,
+      installmentGroupId: groupId,
+      installmentCurrent: index,
+      installmentTotal: total,
+      invoiceMonth: month,
+      createdAt: now,
+    })
+  }
+
+  if (added === 0) return
+  await batch.commit()
 }
 
 export async function updateExpenseTransaction(
@@ -213,17 +440,124 @@ export async function deleteExpenseTransactions(uid: string, transactionIds: str
 }
 
 export async function ensureDefaultCategories(uid: string, existing: ExpenseCategory[]) {
-  const have = new Set(existing.map((item) => normalizeText(item.name)))
+  const have = new Set(existing.map((item) => `${item.kind}:${normalizeText(item.name)}`))
   const created: ExpenseCategory[] = []
 
   for (const item of DEFAULT_CATEGORIES) {
-    if (have.has(normalizeText(item.name))) continue
-    const id = await addExpenseCategory(uid, item.name)
+    const key = `${item.kind}:${normalizeText(item.name)}`
+    const sameName = existing.find((category) => normalizeText(category.name) === normalizeText(item.name))
+    if (have.has(key) || sameName) continue
+    const id = await addExpenseCategory(uid, item.name, item.kind)
     if (!id) continue
-    created.push({ id, name: item.name, createdAt: Date.now() })
+    created.push({ id, name: item.name, kind: item.kind, createdAt: Date.now() })
   }
 
   return [...existing, ...created].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+}
+
+export async function ensureDefaultAccounts(
+  uid: string,
+  existing: FinanceAccount[],
+  transactions: ExpenseTransaction[],
+) {
+  let accounts = existing
+  if (accounts.length === 0) {
+    const created: FinanceAccount[] = []
+    const checkingByInstitution = new Map<string, string>()
+
+    for (const item of DEFAULT_ACCOUNTS) {
+      if (item.type === 'credit') continue
+      const id = await addFinanceAccount(uid, {
+        name: item.name,
+        institution: item.institution,
+        type: item.type,
+        initialBalance: 0,
+        initialBalanceDate: todayISO(),
+        archived: false,
+        brand: null,
+        lastFour: null,
+        limit: null,
+        closingDay: item.closingDay ?? null,
+        dueDay: item.dueDay ?? null,
+        paymentAccountId: null,
+      })
+      if (!id) continue
+      checkingByInstitution.set(item.institution, id)
+      created.push({
+        id,
+        name: item.name,
+        institution: item.institution,
+        type: item.type,
+        initialBalance: 0,
+        initialBalanceDate: todayISO(),
+        archived: false,
+        createdAt: Date.now(),
+        brand: null,
+        lastFour: null,
+        limit: null,
+        closingDay: item.closingDay ?? null,
+        dueDay: item.dueDay ?? null,
+        paymentAccountId: null,
+      })
+    }
+
+    for (const item of DEFAULT_ACCOUNTS) {
+      if (item.type !== 'credit') continue
+      const id = await addFinanceAccount(uid, {
+        name: item.name,
+        institution: item.institution,
+        type: item.type,
+        initialBalance: 0,
+        initialBalanceDate: todayISO(),
+        archived: false,
+        brand: null,
+        lastFour: null,
+        limit: null,
+        closingDay: item.closingDay ?? 10,
+        dueDay: item.dueDay ?? 17,
+        paymentAccountId: checkingByInstitution.get(item.institution) ?? null,
+      })
+      if (!id) continue
+      created.push({
+        id,
+        name: item.name,
+        institution: item.institution,
+        type: item.type,
+        initialBalance: 0,
+        initialBalanceDate: todayISO(),
+        archived: false,
+        createdAt: Date.now(),
+        brand: null,
+        lastFour: null,
+        limit: null,
+        closingDay: item.closingDay ?? 10,
+        dueDay: item.dueDay ?? 17,
+        paymentAccountId: checkingByInstitution.get(item.institution) ?? null,
+      })
+    }
+    accounts = created
+  }
+
+  const missing = transactions.filter((item) => !item.accountId)
+  if (missing.length === 0) return accounts
+
+  const firestore = requireDb()
+  const chunkSize = 400
+  for (let i = 0; i < missing.length; i += chunkSize) {
+    const batch = writeBatch(firestore)
+    missing.slice(i, i + chunkSize).forEach((item) => {
+      const account = inferLegacyAccount(accounts, item.bank, item.method)
+      if (!account) return
+      batch.update(doc(firestore, 'users', uid, 'expenseTransactions', item.id), {
+        accountId: account.id,
+        paymentDate: item.paymentDate || item.date,
+        invoiceMonth: account.type === 'credit' ? item.date.slice(0, 7) : null,
+      })
+    })
+    await batch.commit()
+  }
+
+  return accounts
 }
 
 export async function rememberCategoryRule(
@@ -254,7 +588,7 @@ export async function rememberCategoryRule(
 
 export async function importExpenseTransactions(
   uid: string,
-  rows: Array<Omit<ExpenseTransaction, 'id' | 'createdAt'>>,
+  rows: Array<TransactionInput>,
   rules: ExpenseRule[],
 ) {
   const firestore = requireDb()
@@ -289,3 +623,22 @@ export async function importExpenseTransactions(
     await batch.commit()
   }
 }
+
+export function accountPayload(account: FinanceAccount): AccountInput {
+  return {
+    name: account.name,
+    institution: account.institution,
+    type: account.type,
+    initialBalance: account.initialBalance,
+    initialBalanceDate: account.initialBalanceDate,
+    archived: account.archived,
+    brand: account.brand,
+    lastFour: account.lastFour,
+    limit: account.limit,
+    closingDay: account.closingDay,
+    dueDay: account.dueDay,
+    paymentAccountId: account.paymentAccountId,
+  }
+}
+
+export { institutionToBank, methodFromAccount }
